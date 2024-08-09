@@ -46,14 +46,16 @@ class GDrive
         return $createdFile->id;
     }
 
-    public static function createFolder($folderName)
+    public static function createFolder($folderName, $parentId = null)
     {
         self::init();
         $folder = new DriveFile();
         $folder->setName($folderName);
         $folder->setMimeType('application/vnd.google-apps.folder');
 
-        if (self::$folderId) {
+        if ($parentId) {
+            $folder->setParents([$parentId]);
+        } else {
             $folder->setParents([self::$folderId]);
         }
 
@@ -103,6 +105,12 @@ class GDrive
         self::$service->files->delete($folderId);
     }
 
+    public static function deleteItem($itemId)
+    {
+        self::init();
+        self::$service->files->delete($itemId);
+    }
+
     public static function renameFile($fileId, $newName)
     {
         self::init();
@@ -117,6 +125,21 @@ class GDrive
             return null;
         }
     }
+    public static function renameItem($itemId, $newName)
+    {
+        self::init();
+        $item = new DriveFile();
+        $item->setName($newName);
+        try {
+            $updatedFile = self::$service->files->update($itemId, $item);
+            return $updatedFile;
+        } catch (Exception $e) {
+            echo 'An error occurred: ' . $e->getMessage();
+            return null;
+        }
+    }
+
+
 
     public static function moveFile($fileId, $newFolderId)
     {
@@ -147,17 +170,27 @@ class GDrive
 
             $totalStorage = $storageQuota['limit']; // Total storage limit
             $usedStorage = $storageQuota['usage']; // Total storage used
+            $trashStorage = $storageQuota['trash']; // Storage used by trash
+
+            // Detailed usage breakdown (if available)
+            $usageInDrive = isset($storageQuota['usageInDrive']) ? $storageQuota['usageInDrive'] : 0;
+            $usageInDriveTrash = isset($storageQuota['usageInDriveTrash']) ? $storageQuota['usageInDriveTrash'] : 0;
 
             return [
                 'total_storage' => $totalStorage / (1024 ** 3),
                 'used_storage' => $usedStorage / (1024 ** 3),
-                'remaining_storage' => ($totalStorage - $usedStorage) / (1024 ** 3)
+                'trash_storage' => $trashStorage / (1024 ** 3),
+                'usage_in_drive' => $usageInDrive / (1024 ** 3),
+                'usage_in_drive_trash' => $usageInDriveTrash / (1024 ** 3),
+                'remaining_storage' => ($totalStorage - $usedStorage - $trashStorage) / (1024 ** 3)
             ];
         } catch (Exception $e) {
             echo 'An error occurred: ' . $e->getMessage();
             return null;
         }
     }
+
+
     public static function listFilesAndFolders($folderId = null)
     {
         self::init();
@@ -180,6 +213,96 @@ class GDrive
             }
 
             return $items;
+        } catch (Exception $e) {
+            echo 'An error occurred: ' . $e->getMessage();
+            return null;
+        }
+    }
+    public static function generateDownloadLink($fileId)
+    {
+        return "https://drive.google.com/uc?id={$fileId}";
+    }
+    public static function editPermission($fileId, $permissionType = 'reader')
+    {
+        self::init();
+
+        $permission = new Permission();
+
+        if ($permissionType === 'private') {
+            $permissions = self::$service->permissions->listPermissions($fileId);
+            foreach ($permissions->getPermissions() as $perm) {
+                if ($perm->getType() === 'anyone') {
+                    self::$service->permissions->delete($fileId, $perm->getId());
+                }
+            }
+            return true;
+        }
+
+        $role = $permissionType === 'writer' ? 'writer' : 'reader';
+        $permission->setRole($role);
+        $permission->setType('anyone');
+
+        try {
+            self::$service->permissions->create($fileId, $permission);
+            return true;
+        } catch (Exception $e) {
+            echo 'An error occurred: ' . $e->getMessage();
+            return false;
+        }
+    }
+    public static function resetAndDeleteEverything()
+    {
+        self::init();
+        try {
+            // List all files in Google Drive
+            $pageToken = null;
+            do {
+                $response = self::$service->files->listFiles([
+                    'pageSize' => 1000,
+                    'fields' => 'nextPageToken, files(id)',
+                    'pageToken' => $pageToken
+                ]);
+
+                foreach ($response->files as $file) {
+                    // Delete each file
+                    self::$service->files->delete($file->id);
+                }
+
+                $pageToken = $response->nextPageToken;
+            } while ($pageToken != null);
+
+            // Empty the trash
+            self::$service->files->emptyTrash();
+
+            return "All files deleted and trash emptied.";
+        } catch (Exception $e) {
+            echo 'An error occurred: ' . $e->getMessage();
+            return null;
+        }
+    }
+    public static function deleteEverythingInTrash()
+    {
+        self::init();
+        try {
+            // List all files in the trash
+            $pageToken = null;
+            do {
+                $response = self::$service->files->listFiles([
+                    'q' => 'trashed=true',
+                    'pageSize' => 1000,
+                    'fields' => 'nextPageToken, files(id)',
+                    'pageToken' => $pageToken
+                ]);
+
+                foreach ($response->files as $file) {
+                    // Permanently delete each file
+                    self::$service->files->delete($file->id);
+                }
+
+                $pageToken = $response->nextPageToken;
+            } while ($pageToken != null);
+
+            return "All items in the trash have been permanently deleted.";
         } catch (Exception $e) {
             echo 'An error occurred: ' . $e->getMessage();
             return null;
