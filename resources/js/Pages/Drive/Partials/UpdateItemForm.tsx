@@ -46,21 +46,18 @@ export default function UpdateItemForm({ isOpen, onOpenChange, onClose, item }: 
         })
     }
     function copyLink(driveLink: string) {
-        const textArea = document.createElement("textarea");
-        textArea.value = driveLink;
-        document.body.appendChild(textArea);
-        textArea.focus();
-        textArea.select();
-        try {
-            const test = document.execCommand('copy');
+        if (window.isSecureContext && navigator.clipboard) {
+            navigator.clipboard.writeText(driveLink);
             toast.success("Link copied to clipboard", {
                 className: 'text-green-500',
                 position: 'top-right'
             })
-        } catch (err) {
-            console.error('Unable to copy to clipboard', err);
+        } else {
+            toast.error("Insecured Context", {
+                className: 'text-red-500',
+                position: 'top-right'
+            })
         }
-        document.body.removeChild(textArea);
     }
 
     function download() {
@@ -85,16 +82,18 @@ export default function UpdateItemForm({ isOpen, onOpenChange, onClose, item }: 
                                     <Radio value="read-only">Read Only</Radio>
                                     <Radio value="public">Public</Radio>
                                 </RadioGroup>
-                                <Snippet symbol="" onCopy={(e) => copyLink(item?.driveLink as string)} variant="bordered" className="overflow-x-clip">{item?.driveLink}</Snippet>
 
                             </ModalBody>
                             <ModalFooter>
                                 <Button color="danger" variant="light" onPress={onClose}>
                                     Close
                                 </Button>
+                                <Button color="success" variant="light" onPress={() => copyLink(item?.driveLink as string)}>
+                                    Copy Link
+                                </Button>
                                 {
                                     item?.type == 'file' ? (
-                                        <Button color="success" variant="solid" onPress={download} className="text-white font-semibold">
+                                        <Button color="primary" variant="solid" onPress={download} className="text-white font-semibold">
                                             Download
                                         </Button>
                                     ) : null
